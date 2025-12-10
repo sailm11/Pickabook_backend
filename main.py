@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 
 from gradio_client import Client, handle_file
-from PIL import Image
+from PIL import Image  # still OK to keep, even if not used directly
 import uuid
 import os
 import shutil
@@ -23,7 +23,6 @@ app.add_middleware(
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 OUTPUT_DIR = os.path.join(BASE_DIR, "generated")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -46,15 +45,15 @@ def root():
 # ----------------------------
 # 3. Helper: call InstantID
 # ----------------------------
-def run_instantid(face_path: str, template_path: str, prompt: str) -> str:
+def run_instantid(face_path: str, pose_path: str, prompt: str) -> str:
     """
-    Call InstantID with local file paths (face + template).
+    Call InstantID with local file paths (face + pose).
     Returns the path to the generated image file (on local disk).
     """
 
     result = client.predict(
         face_image_path=handle_file(face_path),
-        pose_image_path=handle_file(template_path),
+        pose_image_path=handle_file(pose_path),
         prompt=prompt,
         negative_prompt=(
             "(lowres, low quality, worst quality:1.2), "
@@ -73,7 +72,7 @@ def run_instantid(face_path: str, template_path: str, prompt: str) -> str:
         guidance_scale=5,
         seed=42,
         scheduler="EulerDiscreteScheduler",
-        enable_LCM=False,      # note: matches your working example
+        enable_LCM=False,
         enhance_face_region=True,
         api_name="/generate_image",
     )
@@ -87,46 +86,61 @@ def run_instantid(face_path: str, template_path: str, prompt: str) -> str:
 # ----------------------------
 @app.post("/personalize")
 async def personalize(
-    image: UploadFile = File(...),
-    template_id: str = Form("template_1"),
+    # main required image (face)
+    image_main: UploadFile = File(..., description="Required main image"),
+    # optional second image for personalization / pose
+    image_optional: UploadFile | None = File(
+        None, description="Optional personalization image"
+    ),
     prompt: str = Form("make brighter picture"),
 ):
     """
-    1. Save uploaded child photo to disk
-    2. Use InstantID with that photo + chosen template
-    3. Copy result into ./generated
-    4. Return URL to final image
+    1. Save uploaded main photo (required) to disk
+    2. If optional second image is provided, save and use as pose image
+       Otherwise, reuse main image as pose (so API requirements are satisfied)
+    3. Call InstantID
+    4. Copy result into ./generated
+    5. Return URL to final image
     """
 
-    # 1. Save uploaded image to a local file
+    # 1. Save required main image
     try:
-        raw_bytes = await image.read()
-        upload_name = f"upload_{uuid.uuid4().hex}.png"
-        upload_path = os.path.join(OUTPUT_DIR, upload_name)
+        raw_bytes = await image_main.read()
+        main_name = f"main_{uuid.uuid4().hex}.png"
+        main_path = os.path.join(OUTPUT_DIR, main_name)
 
-        with open(upload_path, "wb") as f:
+        with open(main_path, "wb") as f:
             f.write(raw_bytes)
     except Exception as e:
-        return JSONResponse(status_code=400, content={"detail": f"Failed to save upload: {e}"})
-
-    # 2. Resolve template path
-    template_filename = f"{template_id}.png"
-    template_path = os.path.join(TEMPLATES_DIR, template_filename)
-
-    if not os.path.exists(template_path):
         return JSONResponse(
-            status_code=400,
-            content={"detail": f"Template not found: {template_filename}"}
+            status_code=400, content={"detail": f"Failed to save main image: {e}"}
         )
+
+    # 2. Save optional personalization image (if provided)
+    pose_path = main_path  # default: reuse main image as pose
+    if image_optional is not None:
+        try:
+            opt_bytes = await image_optional.read()
+            opt_name = f"opt_{uuid.uuid4().hex}.png"
+            opt_path = os.path.join(OUTPUT_DIR, opt_name)
+
+            with open(opt_path, "wb") as f:
+                f.write(opt_bytes)
+
+            pose_path = opt_path
+        except Exception as e:
+            # If optional image fails to save, we just log it and fall back to main image as pose
+            # (You could also return 400 if you want stricter behavior)
+            print(f"Failed to save optional image, falling back to main: {e}")
+            pose_path = main_path
 
     # 3. Call InstantID
     try:
-        instantid_out_path = run_instantid(upload_path, template_path, prompt)
+        instantid_out_path = run_instantid(main_path, pose_path, prompt)
     except Exception as e:
-        # still return something instead of crashing
         return JSONResponse(
             status_code=500,
-            content={"detail": f"InstantID error: {e}"}
+            content={"detail": f"InstantID error: {e}"},
         )
 
     # 4. Copy InstantID output into our OUTPUT_DIR with a nice name
@@ -138,9 +152,8 @@ async def personalize(
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Failed to copy result image: {e}"}
+            content={"detail": f"Failed to copy result image: {e}"},
         )
 
     # 5. Return URL (this is what frontend will display)
-    # If running with uvicorn on localhost:8000 → full URL = http://localhost:8000/generated/<final_name>
     return {"result_url": f"/generated/{final_name}"}
