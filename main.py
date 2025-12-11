@@ -28,9 +28,9 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 app.mount("/generated", StaticFiles(directory=OUTPUT_DIR), name="generated")
 
-HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN");
+HF_TOKEN = os.environ.get("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");
 if HF_TOKEN : 
-    client = Client("InstantX/InstantID",hf_token = HF_TOKEN)
+    client = Client("InstantX/InstantID",token=HF_TOKEN)
 else:
     client = Client("InstantX/InstantID")
 
@@ -42,11 +42,8 @@ def root():
 
 
 
-def run_instantid(face_path: str, pose_path: str, prompt: str) -> str:
-    """
-    Call InstantID with local file paths (face + pose).
-    Returns the path to the generated image file (on local disk).
-    """
+def run_instantid(face_path: str, pose_path: str, prompt: str,template:str| None = None) -> str:
+    
 
     result = client.predict(
         face_image_path=handle_file(face_path),
@@ -59,7 +56,7 @@ def run_instantid(face_path: str, pose_path: str, prompt: str) -> str:
             "deformed, photo, anthropomorphic cat, monochrome, pet collar, "
             "gun, weapon, blue, 3d, drones, drone, buildings in background, green"
         ),
-        style_name="Spring Festival",
+        style_name=template,
         num_steps=30,
         identitynet_strength_ratio=0.8,
         adapter_strength_ratio=0.8,
@@ -74,6 +71,8 @@ def run_instantid(face_path: str, pose_path: str, prompt: str) -> str:
         api_name="/generate_image",
     )
 
+    print(result)
+
     generated_image_path = result[0]  # (generated_images, tips)
     return generated_image_path
 
@@ -87,15 +86,10 @@ async def personalize(
         None, description="Optional personalization image"
     ),
     prompt: str = Form("make brighter picture"),
+
+    template: str = Form("Line art")
 ):
-    """
-    1. Save uploaded main photo (required) to disk
-    2. If optional second image is provided, save and use as pose image
-       Otherwise, reuse main image as pose (so API requirements are satisfied)
-    3. Call InstantID
-    4. Copy result into ./generated
-    5. Return URL to final image
-    """
+   
 
    
     try:
@@ -129,7 +123,7 @@ async def personalize(
 
    
     try:
-        instantid_out_path = run_instantid(main_path, pose_path, prompt)
+        instantid_out_path = run_instantid(main_path, pose_path, prompt,template=template)
     except Exception as e:
         return JSONResponse(
             status_code=500,
