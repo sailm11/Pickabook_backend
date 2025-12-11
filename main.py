@@ -9,9 +9,7 @@ import uuid
 import os
 import shutil
 
-# ----------------------------
-# 1. Basic setup
-# ----------------------------
+
 app = FastAPI()
 
 app.add_middleware(
@@ -27,24 +25,19 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "generated")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# serve /generated files as static
+
 app.mount("/generated", StaticFiles(directory=OUTPUT_DIR), name="generated")
 
-# InstantID client (Hugging Face space id)
+
 client = Client("InstantX/InstantID")
 
 
-# ----------------------------
-# 2. Health check
-# ----------------------------
 @app.get("/")
 def root():
     return {"message": "InstantID backend running"}
 
 
-# ----------------------------
-# 3. Helper: call InstantID
-# ----------------------------
+
 def run_instantid(face_path: str, pose_path: str, prompt: str) -> str:
     """
     Call InstantID with local file paths (face + pose).
@@ -81,14 +74,11 @@ def run_instantid(face_path: str, pose_path: str, prompt: str) -> str:
     return generated_image_path
 
 
-# ----------------------------
-# 4. Main endpoint
-# ----------------------------
 @app.post("/personalize")
 async def personalize(
-    # main required image (face)
+   
     image_main: UploadFile = File(..., description="Required main image"),
-    # optional second image for personalization / pose
+   
     image_optional: UploadFile | None = File(
         None, description="Optional personalization image"
     ),
@@ -103,7 +93,7 @@ async def personalize(
     5. Return URL to final image
     """
 
-    # 1. Save required main image
+   
     try:
         raw_bytes = await image_main.read()
         main_name = f"main_{uuid.uuid4().hex}.png"
@@ -116,8 +106,8 @@ async def personalize(
             status_code=400, content={"detail": f"Failed to save main image: {e}"}
         )
 
-    # 2. Save optional personalization image (if provided)
-    pose_path = main_path  # default: reuse main image as pose
+    
+    pose_path = main_path  
     if image_optional is not None:
         try:
             opt_bytes = await image_optional.read()
@@ -129,12 +119,11 @@ async def personalize(
 
             pose_path = opt_path
         except Exception as e:
-            # If optional image fails to save, we just log it and fall back to main image as pose
-            # (You could also return 400 if you want stricter behavior)
+          
             print(f"Failed to save optional image, falling back to main: {e}")
             pose_path = main_path
 
-    # 3. Call InstantID
+   
     try:
         instantid_out_path = run_instantid(main_path, pose_path, prompt)
     except Exception as e:
@@ -143,7 +132,7 @@ async def personalize(
             content={"detail": f"InstantID error: {e}"},
         )
 
-    # 4. Copy InstantID output into our OUTPUT_DIR with a nice name
+    
     final_name = f"result_{uuid.uuid4().hex}.png"
     final_path = os.path.join(OUTPUT_DIR, final_name)
 
@@ -155,5 +144,5 @@ async def personalize(
             content={"detail": f"Failed to copy result image: {e}"},
         )
 
-    # 5. Return URL (this is what frontend will display)
+    
     return {"result_url": f"/generated/{final_name}"}
