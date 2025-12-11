@@ -28,8 +28,12 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 app.mount("/generated", StaticFiles(directory=OUTPUT_DIR), name="generated")
 
+HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN");
+if HF_TOKEN : 
+    client = Client("InstantX/InstantID",hf_token = HF_TOKEN)
+else:
+    client = Client("InstantX/InstantID")
 
-client = Client("InstantX/InstantID")
 
 
 @app.get("/")
